@@ -16,22 +16,26 @@ import System.Random
 
 type Stats = StatsG Double
 data StatsG n = Stats
-    { wdmg   :: !n -- ^ Weapon damage
-    , wepMul :: !n -- ^ Weapon damage increase (%)
-    , dmgMul :: !n -- ^ Damage multiplier (%)
-    , wspeed :: !n -- ^ Weapon speed increase (%)
-    , wrange :: !n -- ^ Weapon bonus range (%)
-    , cleave :: !n -- ^ Cleave (%)
-    , cdr    :: !n -- ^ Ability cooldown speed (%)
-    , cc     :: !n -- ^ Critical hit chance (%)
-    , chd    :: !n -- ^ Critiacl hit damage (%)
-    , life   :: !n -- ^ Bonus life
-    , lifep  :: !n -- ^ Bonus life (%)
-    , vamp   :: !n -- ^ Lifesteal (%)
-    , bodies :: !n -- ^ Bodies provided (essentially tankiness)
-    , multi  :: !n -- ^ Multistrike (additional hits per attack)
-    , evade  :: !n -- ^ Chance to evade (%)
-    , reduce :: !n -- ^ Damage reduction (%)
+    { wdmg    :: !n -- ^ Weapon damage
+    , wepMul  :: !n -- ^ Weapon damage increase (%)
+    , dmgMul  :: !n -- ^ Damage multiplier (%)
+    , wspeed  :: !n -- ^ Weapon speed increase (%)
+    , wrange  :: !n -- ^ Weapon bonus range (%)
+    , cleave  :: !n -- ^ Cleave (%)
+    , cdr     :: !n -- ^ Ability cooldown speed (%)
+    , cc      :: !n -- ^ Critical hit chance (%)
+    , chd     :: !n -- ^ Critiacl hit damage (%)
+    , life    :: !n -- ^ Bonus life
+    , lifep   :: !n -- ^ Bonus life (%)
+    , regen   :: !n -- ^ Life regen (/s)
+    , vamp    :: !n -- ^ Lifesteal (%)
+    , bodies  :: !n -- ^ Bodies provided (essentially tankiness)
+    , multi   :: !n -- ^ Multistrike (additional hits per attack)
+    , evade   :: !n -- ^ Chance to evade (%)
+    , reduce  :: !n -- ^ Damage reduction (%)
+    , disable :: !n -- ^ Enemy disabling effect
+    , eslow   :: !n -- ^ Enemy slowing effect
+    , debuff  :: !n -- ^ Damage debuff (slow %)
     } deriving (Show, Eq, Functor)
 
 zstats :: Num a => StatsG a
@@ -51,7 +55,7 @@ data Aura = Aura
     , auraStats :: !Stats    -- ^ Aura stats
     }
 
-data AuraType = Self | Camp | Party
+data AuraType = Self | Camp | Party | Debuff
     deriving (Show, Eq)
 
 data Hero = Hero
@@ -77,12 +81,13 @@ data Glyph = Glyph
 -- Some useful instances
 
 instance Applicative StatsG where
-    pure x = Stats x x x x x x x x x x x x x x x x
-    Stats f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 <*>
-        Stats x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16
+    pure x = Stats x x x x x x x x x x x x x x x x x x x x
+    Stats f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 f20 <*>
+        Stats x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20
       = Stats (f1 x1) (f2 x2) (f3 x3) (f4 x4) (f5 x5) (f6 x6) (f7 x7)
               (f8 x8) (f9 x9) (f10 x10) (f11 x11) (f12 x12) (f13 x13)
-              (f14 x14) (f15 x15) (f16 x16)
+              (f14 x14) (f15 x15) (f16 x16) (f17 x17) (f18 x18) (f19 x19)
+              (f20 x20)
 
 instance Num a => Num (StatsG a) where
     fromInteger = pure . fromInteger
@@ -151,24 +156,25 @@ warden = Hero{..}
 
 blademaster = Hero{..}
     where heroName  = "Blademaster"
-          heroStats = baseStats 28 700 + zstats { cc = 25, chd = 1100, multi = 1.2 }
+          heroStats = baseStats 28 700 + zstats { cc = 25, chd = 1100, multi = 0.2 }
           heroBonus = const zstats
           heroSpeed = 1.2
           heroReq _ = True
-          heroAuras = [ bodyAura heroName 4 ]
+          heroAuras = [ bodyAura heroName 1.2 ]
           heroCamp  = Melee
-          heroItems = [ sunshatter, kang ]
-          heroGlyph = holy
+          heroItems = replicate 2 kang
+          heroGlyph = shadow
 
 illidan = Hero{..}
     where heroName  = "Illidan"
-          heroStats = baseStats 35 700 + zstats { cleave = 50, wepMul = 50, evade = 50 }
+          heroStats = baseStats 35 700 + zstats { cleave = 50, wepMul = 50
+                                                ,  evade = 50, regen = 120 }
           heroBonus = \s -> zstats { wspeed = 475 * uptime 15 30 s }
-          heroSpeed = 1.2
+          heroSpeed = 0.9 -- demon form
           heroReq _ = True
           heroAuras = [ bodyAura heroName 1 ]
           heroCamp  = Melee
-          heroItems = [ sunshatter ]
+          heroItems = replicate 2 kang
           heroGlyph = shadow
 
 nova = Hero{..}
@@ -212,18 +218,18 @@ arthas = Hero{..}
           heroSpeed = 1.3
           heroReq _ = True
           heroAuras = [ Aura heroName Party False zstats { wspeed = 50, cdr = 50 }
-                      , bodyAura heroName 16 ]
+                      , bodyAura heroName 1.5 ]
           heroCamp  = Melee
-          heroItems = []
-          heroGlyph = holy
+          heroItems = replicate 2 kang
+          heroGlyph = shadow
 
 heroes :: [Hero]
 heroes = [ -- mandatory
-           malfurion --, illidan
+           malfurion, illidan
            -- good
-         , blademaster --, arthas
+         , blademaster, arthas
            -- deprecated
-         -- , nova, warden, sylvanas
+--       , nova, warden, sylvanas
          ]
 
 -- | Bonus glyph list
@@ -292,26 +298,25 @@ sunshatter = Item{..}
 
 bloodstone = Item{..}
     where itemName  = "Bloodstone Signet"
-          itemStats = zstats { wdmg = 750, life = 25000 }
+          itemStats = zstats { wdmg = 750, life = 25000, regen = 250 }
           itemAuras = [ Aura itemName Self False zstats { reduce = 50 } ]
           itemFilter Hero{..} = heroCamp == Melee
 
 rhinestone = Item{..}
     where itemName  = "Rhinestone Seal"
-          itemStats = zstats { wdmg = 450, wspeed = 100, life = 15000 }
+          itemStats = zstats { wdmg = 450, wspeed = 100, life = 15000, regen = 150 }
           itemAuras = [] -- Essentially useless
           itemFilter Hero{..} = heroCamp == Melee
 
 hellscream's = Item{..}
     where itemName  = "Hellscream's Shield Wall"
-          itemStats = zstats { wdmg = 500, life = 40000 }
+          itemStats = zstats { wdmg = 500, life = 40000, regen = 500 }
           itemAuras = [] -- Essentially useless
           itemFilter Hero{..} = heroCamp == Melee
 
 blackfang = Item{..}
     where itemName  = "Blackfang Weave"
-          itemStats = zstats { wspeed = 100, life = 40000 }
-          --- TODO check aura stacking
+          itemStats = zstats { wspeed = 100, life = 40000, regen = 500 }
           itemAuras = [ Aura itemName Party False zstats { dmgMul = 15 } ]
           itemFilter Hero{..} = heroCamp == Melee
 
@@ -323,14 +328,31 @@ immovable = Item{..}
 
 absolution = Item{..}
     where itemName  = "Shroud of Absolution"
-          itemStats = zstats { life = 35000 }
+          itemStats = zstats { life = 35000, regen = 450 }
           itemAuras = [ Aura itemName Camp False zstats { cdr = 15 } ]
           itemFilter Hero{..} = heroCamp == Melee
 
-items :: [Item]
+bulwark = Item{..}
+    where itemName  = "Blackrock Bulwark"
+          itemStats = zstats { life = 7500, regen = 100, wdmg = 100 }
+          itemAuras = [ Aura itemName Party False zstats { disable = 50 } ]
+          itemFilter Hero{..} = heroCamp == Melee
+
+emerald = Item{..}
+    where itemName  = "Emerald Coil"
+          itemStats = zstats { wspeed = 75, wdmg = 150 }
+          itemAuras = [ Aura itemName Party False zstats { eslow = 50 } ]
+          itemFilter Hero{..} = heroCamp == Melee
+
+aegis = Item{..}
+    where itemName  = "Royal Aegis"
+          itemStats = zstats { life = 1500, regen = 20, cdr = 10 }
+          itemAuras = [ Aura itemName Self False zstats { reduce = 20 } ] -- average-ish
+          itemFilter Hero{..} = heroCamp == Melee
 
 items = [kang, alexandrite, glaive, serendipity, sunshatter, blackfang,
-         bloodstone, rhinestone, hellscream's, immovable, absolution]
+         bloodstone, rhinestone, hellscream's, immovable, absolution, bulwark,
+         emerald, aegis]
 
 -- | DPS calculation
 
@@ -357,7 +379,7 @@ dps Config{..} Stats{..} Hero{..} = combinedDamage * (1 + dmgMul/100)
     where combinedDamage = weaponDamage + abilityDamage
 
           weaponDamage   = (1 + multi) * swingDamage / swingSpeed
-          swingSpeed     = heroSpeed / (1 + wspeed/100)
+          swingSpeed     = heroSpeed / (1 + wspeed/100) * (1 - debuff/100)
           swingDamage    = (1 + cleaveDensity * cleave/100) * singleDamage
           singleDamage   = wdmg * (1 + wepMul/100) * critMul
           critMul        = 1 + cc/100 * (chd/100 - 1)
@@ -376,21 +398,23 @@ toughness s@Stats{..} h = hptotal / dmgCoeff s h
 
 -- Damage multiplier (factors into toughness)
 dmgCoeff :: Stats -> Hero -> Double
-dmgCoeff Stats{..} Hero{..} = soft * hard * mod
+dmgCoeff Stats{..} Hero{..} = soft * hard * mod * stun * slow
     where soft = 1 - evade/100
           hard = 1 - reduce/100
           mod  = case heroCamp of Melee -> 2.0; _ -> 1.0
+          stun = 1 - disable/100
+          slow = 1 - eslow/100
 
 -- Enemy DPS approximation
 mobDamage :: Config -> Stats -> DPS
 mobDamage Config{..} Stats{..} = mobCount * mobDPS / targetCount
-    where mobDPS      = 8000 -- death revenant w/ buffs
-          mobCount    = 1 + 3 * cleaveDensity -- decent estimation
+    where mobDPS      = 8000 -- death revenant-ish w/ buffs
+          mobCount    = 1 + 4 * cleaveDensity -- decent estimation
           targetCount = bodies / 2 -- assume a worst case scenario
 
 -- Healing estimation
 healing :: Stats -> DPS -> Double
-healing Stats{..} dps = dps * vamp/100
+healing Stats{..} dps = dps * vamp/100 + regen
 
 -- Survivability rating
 tankiness :: Config -> Stats -> Hero -> DPS -> Double
@@ -416,12 +440,18 @@ playerStats (h,is) = heroStats h + foldMap itemStats is + glyphStats (heroGlyph 
 
 -- Party does not include the hero itself
 allAuras :: Config -> Party -> Player -> [Aura]
-allAuras c ps p@(h,_) = nub $ partyAuras ++ playerAuras p ++ bonusAuras c
+allAuras c ps p@(h,_) = nub $ partyAuras ++ playerAuras p ++ bonus
     where partyAuras = [ a | p' <- ps, a <- playerAuras p', auraApplies p' a ]
           auraApplies (h',_) a = case auraType a of
-                Self  -> False
-                Party -> True
-                Camp  -> heroCamp h' == heroCamp h || ignoreConditions c
+                Self   -> False
+                Party  -> True
+                Camp   -> heroCamp h' == heroCamp h || ignoreConditions c
+                Debuff -> debuffApplies a
+
+          bonus = filter debuffApplies $ bonusAuras c
+          debuffApplies a = not (ignoreConditions c) && case auraType a of
+                Debuff -> heroCamp h == Melee
+                _      -> True
 
 partyStats :: Config -> Party -> [Stats]
 partyStats c = go []
@@ -439,7 +469,7 @@ det :: Choice [] a
 det 0 _      = [[]]
 det _ []     = []
 det n (x:xs) = do
-    c <- [0..n]
+    c <- [n,n-1..0]
     r <- det (n-c) xs
     return $ replicate c x ++ r
 
@@ -497,13 +527,14 @@ guessLoop c n = go 0
 
 showStats :: Stats -> String
 showStats s = intercalate ", " [ show a ++ " " ++ n | (f, n) <- selectors
-                               , let a = f s , a > 0 ]
+                               , let a = f s , a /= 0 ]
     where selectors = [ (wdmg, "WD"), (wepMul, "WD%"), (dmgMul, "DMG%")
                       , (wspeed, "WS%"), (cleave, "CLV%"), (cdr, "AbS%")
                       , (cc, "CC%"), (chd, "CHD%"), (life, "HP")
                       , (vamp, "LfS"), (bodies, "BOD"), (multi, "MS")
                       , (wrange, "WRn"), (lifep, "HP%"), (evade, "Ddg%")
-                      , (reduce, "Red%")
+                      , (reduce, "Red%"), (disable, "Stn%"), (eslow, "Slo%")
+                      , (regen, "HP/s"), (debuff, "Dbf%")
                       ]
 
 printPlayer :: Player -> DPS -> IO ()
@@ -536,4 +567,8 @@ printResult c (dps,party,stats) = do
 main :: IO ()
 main = bruteForce conf 2 `forM_` printResult conf
 --main = guessLoop conf 4
-    where conf = aoeConf
+    where conf = aoeConf {
+            bonusAuras = [ Aura "Debuff"   Debuff False zstats { debuff = 50 }
+                         , Aura "Mind Rot" Debuff False zstats { cdr = -33 }
+                         ]
+          }
