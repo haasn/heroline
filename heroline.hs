@@ -58,7 +58,7 @@ data Aura = Aura
     , auraType  :: !AuraType -- ^ What the aura affects
     , auraStack :: !Bool     -- ^ Whether or not an aura stacks
     , auraStats :: !Stats    -- ^ Aura stats
-    }
+    } deriving Show
 
 data AuraType = Self | Camp | Party | Debuff | Drain
     deriving (Show, Eq)
@@ -77,7 +77,7 @@ data Hero = Hero
     , heroTags  :: ![HeroTag]     -- ^ Hero's extra tags
     }
 
-data HeroTag = AbilityUser | WeaponUser | NeedsCD | NeedsReg | Tank
+data HeroTag = AbilityUser | WeaponUser | NeedsCD | NeedsReg | Tank | Dangerous
     deriving (Show, Eq)
 
 data HeroCamp = Melee | Range
@@ -85,8 +85,8 @@ data HeroCamp = Melee | Range
 
 data Ability = Ability
     { abilName  :: !String
-    , abilDmg   :: Config -> Double -- ^ Damage dealt per hit (base)
-    , abilSpeed :: Stats  -> Double -- ^ Hits per second
+    , abilDmg   :: Config -> Double          -- ^ Damage dealt per hit (base)
+    , abilSpeed :: Config -> Stats -> Double -- ^ Hits per second
     }
 
 data Glyph = Glyph
@@ -260,7 +260,6 @@ malfurion = Hero{..}
           heroAuras = [ Aura heroName   Party False zstats { wspeed = 50 }
                       , Aura "MalfStun" Party False zstats { reduce = 10 } ]
           heroCamp  = Range
-          -- Hard coded for efficiency
           heroItems = [ serendipity, alexandrite ] ++ replicate 4 kang
           heroGlyph = fire
           heroTags  = [WeaponUser]
@@ -292,27 +291,48 @@ shieldbearer = Hero{..}
                       , Aura "Knockback" Party True zstats { reduce = 50 }
                       ]
           heroCamp  = Melee
-          heroItems = [ dreadstone, bloodstone ] ++ replicate 2 san'layn
+          heroItems = [ dreadstone, hellscream's, san'layn, skullflame ]
           heroGlyph = shadow
           heroTags  = [AbilityUser, Tank, NeedsReg]
 
           -- Abilities
-          barrier = Ability { abilName  = "Shield Barrier"
-                            -- Really crude estimation (for now)
-                            , abilDmg   = const $ 106 * 15
-                            , abilSpeed = const $ 5
-                            }
+          barrier = Ability
+              { abilName  = "Shield Barrier"
+              , abilDmg   = \Config{..}   -> 106 * (1 + mobHitDensity/3)
+              , abilSpeed = \Config{..} _ -> 0.1 * (1 + mobHitDensity)
+              }
+
+revenant = Hero{..}
+    where heroName  = "Revenant"
+          heroStats = baseStats 26 700 <> zstats { regen = 60 }
+          heroBonus = \Stats{..} -> zstats { wdmg = abilPow * 0.5 }
+          heroAbils = [ immolation ]
+          heroSpeed = 1.3
+          heroReq _ = True
+          heroAuras = [ bodyAura heroName 1 ]
+          heroCamp  = Melee
+          heroItems = []
+          heroGlyph = shadow
+          heroTags  = [WeaponUser, AbilityUser, Tank]
+
+          -- Abilities
+          immolation = Ability
+              { abilName  = "Immolation"
+              , abilDmg   = \Config{..} -> 120 * (1 + mobHitDensity)
+              , abilSpeed = \_ _ -> 1
+              }
 
 heroes :: [Hero]
 heroes = [
            shieldbearer
+         , revenant
          , malfurion
---       , illidan
---       , blademaster
---       , arthas
---       , nova
---       , warden
---       , sylvanas
+         , illidan
+         , blademaster
+         , arthas
+         , nova
+         , warden
+         , sylvanas
          ]
 
 -- | Bonus glyph list
@@ -395,7 +415,7 @@ bloodstone = Item{..}
     where itemName  = "Bloodstone Signet"
           itemStats = zstats { wdmg = 750, life = 25000, regen = 250 }
           itemAuras = [ Aura itemName Self False zstats { reduce = 50 } ]
-          itemFilter = tag Tank
+          itemFilter = tag Tank <> tag Dangerous
 
 rhinestone = Item{..}
     where itemName  = "Rhinestone Seal"
@@ -475,23 +495,27 @@ type DPS = (Double, Double, Double) -- Physical, Magical, Drain
 
 -- Physical, Magical, Drain
 dps :: Config -> Stats -> Hero -> DPS
-dps c@Config{..} s@Stats{..} Hero{..} = (weaponDamage, abilityDamage, drainDamage)
-    where weaponDamage   = (1 + multi) * swingDamage / swingSpeed
+dps c@Config{..} s@Stats{..} Hero{..} = (weaponDamage, abilityDamage, 0)
+    where weaponDamage   = targetsHit * swingDamage / swingSpeed
           swingSpeed     = heroSpeed / (1 + wspeed/100) * (1 - debuff/100)
           swingDamage    = (1 + cleaveDensity * cleave/100) * singleDamage
           singleDamage   = wdmg * (1 + wepMul/100) * critMul * totMul
           critMul        = 1 + cc/100 * (chd/100 - 1)
+          targetsHit     = 1 + min cleaveDensity multi
 
           abilityDamage  = totMul * (1 + abilMul/100) * (1 + abilPow/100) * abilities
           abilities      = sum [ admg * aspeed | Ability{..} <- heroAbils
                                , let admg   = abilDmg c
-                               , let aspeed = abilSpeed s
+                               , let aspeed = abilSpeed c s
                                ]
 
-          drainDamage    = (1 + mobHitDensity) * mobHP * (drainp/100)
-          mobHP          = 500000
-
           totMul         = 1 + dmgMul/100
+
+drainDPS :: Config -> [Aura] -> Double
+drainDPS Config{..} as = (1 + mobHitDensity) * mobHP * (drainp/100)
+    where Stats{..} = mconcat [ auraStats a | a@Aura { auraType = Drain } <- as ]
+          mobHP     = 500000
+
 
 -- | Toughness estimation
 
@@ -548,11 +572,10 @@ allAuras :: Config -> Party -> Player -> [Aura]
 allAuras c ps p@(h,_) = nub $ partyAuras ++ playerAuras p ++ bonus
     where partyAuras = [ a | p' <- ps, a <- playerAuras p', auraApplies p' a ]
           auraApplies (h',_) a = case auraType a of
-                Self   -> False
                 Party  -> True
                 Camp   -> heroCamp h' == heroCamp h || ignoreConditions c
                 Debuff -> debuffApplies a
-                Drain  -> False
+                _      -> False
 
           bonus = filter debuffApplies $ bonusAuras c
           debuffApplies a = not (ignoreConditions c) && case auraType a of
@@ -602,17 +625,24 @@ type Result = ([DPS], Party, [Stats])
 
 attempt :: Config -> Party -> Maybe Result
 attempt c party = do
-    -- Compute its stats/auras
+    -- Compute its stats
     let !stats = partyStats c party
         !setup = zip (map fst party) stats
+
     -- Ensure the party is actually legal
     guard $ ignoreConditions c || and [ heroReq h s | (h,s) <- setup ]
+
     -- Compute the DPS values and ensure the party can survive
     let !ds = [ dps c s h | (h,s) <- setup ]
     guard $ ignoreConditions c || and [ canSurvive c s h d
                                       | (d, (h,s)) <- zip ds setup ]
 
-    return (ds, party, stats)
+    -- Compute the aura drain DPS (and distribute it)
+    let !auras = nub $ foldMap playerAuras party
+        !drdps = drainDPS c auras / genericLength party
+        !ds'   = [ (pd, md, drdps) | (pd, md, _) <- ds ]
+
+    return (ds', party, stats)
 
 bruteForce :: Config -> Int -> [Result]
 bruteForce c = getRecords . catMaybes . map (attempt c) . partyChoice det det
@@ -684,7 +714,7 @@ printResult c (dps,party,stats) = do
         putStrLn $ auraName ++ ": " ++ showStats auraStats
 
     let pool = 500000 * 50
-        dsum (p,m,d) = p+m+d
+        dsum (p,m,d) = p + m + d
     putStrLn $ "Time needed to kill 50 DRs: " ++ show (pool / dsum total)
 
 -- Configuration
@@ -703,13 +733,13 @@ defConf = Config { cleaveDensity = 0
                  , bonusAuras = [] }
 
 midConf, lateConf, sillyConf :: Config
-midConf   = defConf { cleaveDensity = 1.5,  mobHitDensity = 5   }
-lateConf  = defConf { cleaveDensity = 10.0, mobHitDensity = 100 }
+midConf   = defConf { cleaveDensity = 1.5,  mobHitDensity = 5  }
+lateConf  = defConf { cleaveDensity = 10.0, mobHitDensity = 50 }
 sillyConf = lateConf { ignoreConditions = True }
 
 main :: IO ()
 main = bruteForce conf 1 `forM_` printResult conf
---main = guessLoop conf 2
+--main = guessLoop conf 4
     where conf = lateConf {
             bonusAuras = [ Aura "Slow"     Debuff False zstats { debuff = 25 }
                          , Aura "Curse"    Debuff False zstats { debuff = 33 }
