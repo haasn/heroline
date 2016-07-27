@@ -285,20 +285,28 @@ shieldbearer = Hero{..}
           heroBonus = const zstats
           heroAbils = [ barrier ]
           heroSpeed = 1.5
-          heroReq _ = True
           heroAuras = [ bodyAura heroName 1
                       -- Generous estimation
                       , Aura "Knockback" Party True zstats { reduce = 50 }
                       ]
           heroCamp  = Melee
+          -- Setup A (current):
+{-
           heroItems = [ dreadstone, hellscream's, san'layn, skullflame ]
           heroGlyph = shadow
           heroTags  = [AbilityUser, Tank, NeedsReg]
+          heroReq _ = const True
+-}
+          -- Setup B (post-apocalyptic):
+          heroItems = [ bulwark, emerald ] ++ replicate 2 san'layn
+          heroGlyph = blood
+          heroTags  = [AbilityUser, Tank, NeedsReg, Dangerous]
+          heroReq Stats{..} = life * (1 + lifep/100) > 150000
 
           -- Abilities
           barrier = Ability
               { abilName  = "Shield Barrier"
-              , abilDmg   = \Config{..}   -> 106 * (1 + mobHitDensity/3)
+              , abilDmg   = \Config{..}   -> 106 * (1 + mobHitDensity/6)
               , abilSpeed = \Config{..} _ -> 0.1 * (1 + mobHitDensity)
               }
 
@@ -353,8 +361,12 @@ shadow = Glyph{..}
     where glyphName  = "Shadow Glyph"
           glyphStats = zstats { steal = 12, vamp = 30 }
 
+blood = Glyph{..}
+    where glyphName  = "Blood Glyph"
+          glyphStats = zstats { lifep = 10, regenp = 10, steal = 3, vamp = 3 }
+
 glyphs :: [Glyph]
-glyphs = [fire, frost, holy, shadow]
+glyphs = [fire, frost, holy, shadow, blood]
 
 -- | Bonus aura list (useful for currently-unimplemented heroes etc.)
 
@@ -536,7 +548,7 @@ mobDamage :: Config -> Stats -> Double
 mobDamage Config{..} Stats{..} = mobCount * mobDPS / targetCount
     where mobDPS      = 8000 -- death revenant-ish w/ buffs
           mobCount    = mobHitDensity
-          targetCount = bodies / 2 -- assume a worst case scenario
+          targetCount = max 1 $ bodies / 2 -- assume a worst case scenario
 
 -- Healing estimation
 healing :: Stats -> DPS -> Double
@@ -553,6 +565,10 @@ tankiness c s h d = healing s d - mobDamage c s * dmgCoeff s h
 canSurvive :: Config -> Stats -> Hero -> DPS -> Bool
 canSurvive _ _ Hero { heroCamp = Range } _ = True
 canSurvive c s h d = tankiness c s h d > 1000 && toughness s h >= mobDamage c s
+
+-- Effective healing
+eheal :: Stats -> Hero -> DPS -> Double
+eheal s h d = healing s d / dmgCoeff s h
 
 -- | Group simulation
 
@@ -733,8 +749,8 @@ defConf = Config { cleaveDensity = 0
                  , bonusAuras = [] }
 
 midConf, lateConf, sillyConf :: Config
-midConf   = defConf { cleaveDensity = 1.5,  mobHitDensity = 5  }
-lateConf  = defConf { cleaveDensity = 10.0, mobHitDensity = 50 }
+midConf   = defConf { cleaveDensity = 1.5, mobHitDensity = 5  }
+lateConf  = defConf { cleaveDensity = 5.0, mobHitDensity = 50 }
 sillyConf = lateConf { ignoreConditions = True }
 
 main :: IO ()
